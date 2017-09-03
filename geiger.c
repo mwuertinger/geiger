@@ -60,32 +60,32 @@
 
 // Includes
 #include <avr/io.h>			// this contains the AVR IO port definitions
-#include <avr/interrupt.h>	// interrupt service routines
-#include <avr/pgmspace.h>	// tools used to store variables in program memory
-#include <avr/sleep.h>		// sleep mode utilities
-#include <util/delay.h>		// some convenient delay functions
+#include <avr/interrupt.h>		// interrupt service routines
+#include <avr/pgmspace.h>		// tools used to store variables in program memory
+#include <avr/sleep.h>			// sleep mode utilities
+#include <util/delay.h>			// some convenient delay functions
 #include <stdlib.h>			// some handy functions like utoa()
 
 // Defines
-#define VERSION			"1.00"
-#define URL				"http://mightyohm.com/geiger"
+#define VERSION		"1.00"
+#define URL		"http://mightyohm.com/geiger"
 
-#define	F_CPU			8000000	// AVR clock speed in Hz
-#define	BAUD			9600	// Serial BAUD rate
+#define	F_CPU		8000000		// AVR clock speed in Hz
+#define	BAUD		9600		// Serial BAUD rate
 #define SER_BUFF_LEN	11		// Serial buffer length
-#define THRESHOLD		1000	// CPM threshold for fast avg mode
-#define LONG_PERIOD		60		// # of samples to keep in memory in slow avg mode
+#define THRESHOLD	1000		// CPM threshold for fast avg mode
+#define LONG_PERIOD	60		// # of samples to keep in memory in slow avg mode
 #define SHORT_PERIOD	5		// # or samples for fast avg mode
-#define SCALE_FACTOR	57		//	CPM to uSv/hr conversion factor (x10,000 to avoid float)
-#define PULSEWIDTH		100		// width of the PULSE output (in microseconds)
+#define SCALE_FACTOR	57		// CPM to uSv/hr conversion factor (x10,000 to avoid float)
+#define PULSEWIDTH	100		// width of the PULSE output (in microseconds)
 
 // Function prototypes
-void uart_putchar(char c);			// send a character to the serial port
-void uart_putstring(char *buffer);		// send a null-terminated string in SRAM to the serial port
+void uart_putchar(char c);		// send a character to the serial port
+void uart_putstring(char *buffer);	// send a null-terminated string in SRAM to the serial port
 void uart_putstring_P(char *buffer);	// send a null-terminated string in PROGMEM to the serial port
 
-void checkevent(void);	// flash LED and beep the piezo
-void sendreport(void);	// log data over the serial port
+void checkevent(void);			// flash LED and beep the piezo
+void sendreport(void);			// log data over the serial port
 
 // Global variables
 volatile uint8_t nobeep;		// flag used to mute beeper
@@ -96,19 +96,19 @@ volatile uint16_t cps;			// GM counts per second, updated once a second
 volatile uint8_t overflow;		// overflow flag
 
 volatile uint8_t buffer[LONG_PERIOD];	// the sample buffer
-volatile uint8_t idx;					// sample buffer index
+volatile uint8_t idx;			// sample buffer index
 
-volatile uint8_t eventflag;	// flag for ISR to tell main loop if a GM event has occurred
-volatile uint8_t tick;		// flag that tells main() when 1 second has passed
+volatile uint8_t eventflag;		// flag for ISR to tell main loop if a GM event has occurred
+volatile uint8_t tick;			// flag that tells main() when 1 second has passed
 
-char serbuf[SER_BUFF_LEN];	// serial buffer
+char serbuf[SER_BUFF_LEN];		// serial buffer
 uint8_t mode;				// logging mode, 0 = slow, 1 = fast, 2 = inst
 
 
 // Interrupt service routines
 
-//	Pin change interrupt for pin INT0
-//	This interrupt is called on the falling edge of a GM pulse.
+// Pin change interrupt for pin INT0
+// This interrupt is called on the falling edge of a GM pulse.
 ISR(INT0_vect)
 {
 	if (count < UINT16_MAX)	// check for overflow, if we do overflow just cap the counts at max possible
@@ -124,24 +124,21 @@ ISR(INT0_vect)
 	eventflag = 1;	// tell main program loop that a GM pulse has occurred
 }
 
-//	Pin change interrupt for pin INT1 (pushbutton)
-//	If the user pushes the button, this interrupt is executed.
-//	We need to be careful about switch bounce, which will make the interrupt
-//	execute multiple times if we're not careful.
+// Pin change interrupt for pin INT1 (pushbutton)
+// If the user pushes the button, this interrupt is executed.
+// We need to be careful about switch bounce, which will make the interrupt
+// execute multiple times if we're not careful.
 ISR(INT1_vect)
 {
-	_delay_ms(25);					// slow down interrupt calls (crude debounce)
-
-	if ((PIND & _BV(PD3)) == 0)		// is button still pressed?
-		nobeep ^= 1;				// toggle mute mode
-
-	EIFR |= _BV(INTF1);				// clear interrupt flag to avoid executing ISR again due to switch bounce
+	_delay_ms(25);			// slow down interrupt calls (crude debounce)
+	if ((PIND & _BV(PD3)) == 0)	// is button still pressed?
+		nobeep ^= 1;		// toggle mute mode
+	EIFR |= _BV(INTF1);		// clear interrupt flag to avoid executing ISR again due to switch bounce
 }
 
-/*	Timer1 compare interrupt
- *	This interrupt is called every time TCNT1 reaches OCR1A and is reset back to 0 (CTC mode).
- *  Timer1 is setup so this happens once a second.
- */
+// Timer1 compare interrupt
+// This interrupt is called every time TCNT1 reaches OCR1A and is reset back to 0 (CTC mode).
+// Timer1 is setup so this happens once a second.
 ISR(TIMER1_COMPA_vect)
 {
 	uint8_t i;	// index for fast mode
@@ -228,6 +225,7 @@ void checkevent(void)
 		TCCR0A &= ~(_BV(COM0A0));	// disconnect OCR0A from Timer0, this avoids occasional HVPS whine after beep
 	}
 }
+
 // log data over the serial port
 void sendreport(void)
 {
