@@ -326,6 +326,9 @@ int main(void)
 	OCR1A = 31250;	// 32us * 31250 = 1 sec
 	TIMSK = _BV(OCIE1A);  // Timer1 overflow interrupt enable
 
+	// Disable beep by default
+	nobeep = 1;
+
 	sei();	// Enable interrupts
 
 	while(1) {	// loop forever
