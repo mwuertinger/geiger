@@ -72,11 +72,7 @@
 
 #define	F_CPU		8000000		// AVR clock speed in Hz
 #define	BAUD		9600		// Serial BAUD rate
-#define SER_BUFF_LEN	11		// Serial buffer length
-#define THRESHOLD	1000		// CPM threshold for fast avg mode
-#define LONG_PERIOD	60		// # of samples to keep in memory in slow avg mode
-#define SHORT_PERIOD	5		// # or samples for fast avg mode
-#define SCALE_FACTOR	57		// CPM to uSv/hr conversion factor (x10,000 to avoid float)
+#define SER_BUFF_LEN	17		// Serial buffer length
 #define PULSEWIDTH	100		// width of the PULSE output (in microseconds)
 
 // Function prototypes
@@ -88,21 +84,13 @@ void checkevent(void);			// flash LED and beep the piezo
 void sendreport(void);			// log data over the serial port
 
 // Global variables
-volatile uint8_t nobeep;		// flag used to mute beeper
-volatile uint16_t count;		// number of GM events that has occurred
-volatile uint16_t slowcpm;		// GM counts per minute in slow mode
-volatile uint16_t fastcpm;		// GM counts per minute in fast mode
-volatile uint16_t cps;			// GM counts per second, updated once a second
-volatile uint8_t overflow;		// overflow flag
-
-volatile uint8_t buffer[LONG_PERIOD];	// the sample buffer
-volatile uint8_t idx;			// sample buffer index
+volatile uint8_t feedback_mode;		// used to turn led/beeper on and off.
+volatile uint64_t count;		// number of GM events that has occurred
 
 volatile uint8_t eventflag;		// flag for ISR to tell main loop if a GM event has occurred
 volatile uint8_t tick;			// flag that tells main() when 1 second has passed
 
 char serbuf[SER_BUFF_LEN];		// serial buffer
-uint8_t mode;				// logging mode, 0 = slow, 1 = fast, 2 = inst
 
 
 // Interrupt service routines
@@ -111,7 +99,7 @@ uint8_t mode;				// logging mode, 0 = slow, 1 = fast, 2 = inst
 // This interrupt is called on the falling edge of a GM pulse.
 ISR(INT0_vect)
 {
-	if (count < UINT16_MAX)	// check for overflow, if we do overflow just cap the counts at max possible
+	if (count < UINT64_MAX)	// check for overflow, if we do overflow just cap the counts at max possible
 		count++; // increase event counter
 
 	// send a pulse to the PULSE connector
@@ -132,7 +120,7 @@ ISR(INT1_vect)
 {
 	_delay_ms(25);			// slow down interrupt calls (crude debounce)
 	if ((PIND & _BV(PD3)) == 0)	// is button still pressed?
-		nobeep ^= 1;		// toggle mute mode
+		feedback_mode++;		// next feedback mode
 	EIFR |= _BV(INTF1);		// clear interrupt flag to avoid executing ISR again due to switch bounce
 }
 
@@ -141,36 +129,7 @@ ISR(INT1_vect)
 // Timer1 is setup so this happens once a second.
 ISR(TIMER1_COMPA_vect)
 {
-	uint8_t i;	// index for fast mode
 	tick = 1;	// update flag
-
-	//PORTB ^= _BV(PB4);	// toggle the LED (for debugging purposes)
-	cps = count;
-	slowcpm -= buffer[idx];		// subtract oldest sample in sample buffer
-
-	if (count > UINT8_MAX) {	// watch out for overflowing the sample buffer
-		count = UINT8_MAX;
-		overflow = 1;
-	}
-
-	slowcpm += count;			// add current sample
-	buffer[idx] = count;	// save current sample to buffer (replacing old value)
-
-	// Compute CPM based on the last SHORT_PERIOD samples
-	fastcpm = 0;
-	for(i=0; i<SHORT_PERIOD;i++) {
-		int8_t x = idx - i;
-		if (x < 0)
-			x = LONG_PERIOD + x;
-		fastcpm += buffer[x];	// sum up the last 5 CPS values
-	}
-	fastcpm = fastcpm * (LONG_PERIOD/SHORT_PERIOD);	// convert to CPM
-
-	// Move to the next entry in the sample buffer
-	idx++;
-	if (idx >= LONG_PERIOD)
-		idx = 0;
-	count = 0;  // reset counter
 }
 
 // Functions
@@ -208,9 +167,10 @@ void checkevent(void)
 	if (eventflag) {		// a GM event has occurred, do something about it!
 		eventflag = 0;		// reset flag as soon as possible, in case another ISR is called while we're busy
 
-		PORTB |= _BV(PB4);	// turn on the LED
-
-		if(!nobeep) {		// check if we're in mute mode
+		if (feedback_mode & 1) {
+			PORTB |= _BV(PB4);	// turn on the LED
+		}
+		if (feedback_mode & 2) {
 			TCCR0A |= _BV(COM0A0);	// enable OCR0A output on pin PB2
 			TCCR0B |= _BV(CS01);	// set prescaler to clk/8 (1Mhz) or 1us/count
 			OCR0A = 160;	// 160 = toggle OCR0A every 160ms, period = 320us, freq= 3.125kHz
@@ -219,71 +179,39 @@ void checkevent(void)
 		// 10ms delay gives a nice short flash and 'click' on the piezo
 		_delay_ms(10);
 
-		PORTB &= ~(_BV(PB4));	// turn off the LED
+		PORTB &= ~(_BV(PB4));		// turn off the LED
 
-		TCCR0B = 0;				// disable Timer0 since we're no longer using it
+		TCCR0B = 0;			// disable Timer0 since we're no longer using it
 		TCCR0A &= ~(_BV(COM0A0));	// disconnect OCR0A from Timer0, this avoids occasional HVPS whine after beep
 	}
+}
+
+// convert uint64 into hex. result is written to buf which must be at least 17 bytes long.
+void hexu64(uint64_t x, char *buf)
+{
+        // buf is 64/4+1 = 17 bytes long
+	char *p = buf + 15;
+        buf[16] = '\0';
+
+        for (; p >= buf; p--) {
+                uint8_t d = x & 0xF; // get last 4 bits
+                if (d < 10)
+                        *p = '0' + d;
+                else
+                        *p = 'A' + (d - 10);
+                x >>= 4; // shift 4 bits to the right
+        }
 }
 
 // log data over the serial port
 void sendreport(void)
 {
-	uint32_t cpm;	// This is the CPM value we will report
 	if(tick) {	// 1 second has passed, time to report data via UART
 		tick = 0;	// reset flag for the next interval
 
-		if (overflow) {
-			cpm = cps*60UL;
-			mode = 2;
-			overflow = 0;
-		}
-		else if (fastcpm > THRESHOLD) {	// if cpm is too high, use the short term average instead
-			mode = 1;
-			cpm = fastcpm;	// report cpm based on last 5 samples
-		} else {
-			mode = 0;
-			cpm = slowcpm;	// report cpm based on last 60 samples
-		}
-
-		// Send CPM value to the serial port
-		uart_putstring_P(PSTR("CPS, "));
-		utoa(cps, serbuf, 10);		// radix 10
+		// Send count value to the serial port
+		hexu64(count, serbuf);
 		uart_putstring(serbuf);
-
-		uart_putstring_P(PSTR(", CPM, "));
-		ultoa(cpm, serbuf, 10);		// radix 10
-		uart_putstring(serbuf);
-
-		uart_putstring_P(PSTR(", uSv/hr, "));
-
-		// calculate uSv/hr based on scaling factor, and multiply result by 100
-		// so we can easily separate the integer and fractional components (2 decimal places)
-		uint32_t usv_scaled = (uint32_t)(cpm*SCALE_FACTOR);	// scale and truncate the integer part
-
-		// this reports the integer part
-		utoa((uint16_t)(usv_scaled/10000), serbuf, 10);
-		uart_putstring(serbuf);
-
-		uart_putchar('.');
-
-		// this reports the fractional part (2 decimal places)
-		uint8_t fraction = (usv_scaled/100)%100;
-		if (fraction < 10)
-			uart_putchar('0');	// zero padding for <0.10
-		utoa(fraction, serbuf, 10);
-		uart_putstring(serbuf);
-
-		// Tell us what averaging method is being used
-		if (mode == 2) {
-			uart_putstring_P(PSTR(", INST"));
-		} else if (mode == 1) {
-			uart_putstring_P(PSTR(", FAST"));
-		} else {
-			uart_putstring_P(PSTR(", SLOW"));
-		}
-
-		// We're done reporting data, output a newline.
 		uart_putchar('\n');
 	}
 }
@@ -298,9 +226,6 @@ int main(void)
 
 	// Enable USART transmitter and receiver
 	UCSRB = (1<<RXEN) | (1<<TXEN);
-
-	uart_putstring_P(PSTR("mightyohm.com Geiger Counter " VERSION "\n"));
-	uart_putstring_P(PSTR(URL "\n"));
 
 	// Set up AVR IO ports
 	DDRB = _BV(PB4) | _BV(PB2);  // set pins connected to LED and piezo as outputs
@@ -320,12 +245,15 @@ int main(void)
 	TCCR0B = 0;	// stop Timer0 (no sound)
 
 	// Set up Timer1 for 1 second interrupts
-	TCCR1B = _BV(WGM12) | _BV(CS12);  // CTC mode, prescaler = 256 (32us ticks)
-	OCR1A = 31250;	// 32us * 31250 = 1 sec
+	// TCCR1B = _BV(WGM12) | _BV(CS12);  // CTC mode, prescaler = 256 (32us ticks)
+	// OCR1A = 31250;	// 32us * 31250 = 1 sec
+	TCCR1B = _BV(WGM12) | _BV(CS12) | _BV(CS10); // CTC mode, prescaler = 1024 (128us ticks)
+	OCR1A = 65535; // 128us * 65535 = ~8.4s
+	
 	TIMSK = _BV(OCIE1A);  // Timer1 overflow interrupt enable
 
-	// Disable beep by default
-	nobeep = 1;
+	feedback_mode = 0;	// No feedback by default
+	count = 0;		// Initialize counter
 
 	sei();	// Enable interrupts
 
