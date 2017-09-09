@@ -57,3 +57,13 @@ Count:      331
 Rate:       0.36696/s
 Dose rate:  0.12550μS/h
 ```
+
+## Mum's terrace
+```
+Start:      2017-09-09 12:43:00
+End:        2017-09-09 13:03:13 
+Duration:   1213s
+Count:      669
+Rate:       0.55153/s
+Dose rate:  0.18862μS/h
+```
