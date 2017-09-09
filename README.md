@@ -29,17 +29,21 @@ Dose rate:  0.14339μS/h
 ```
 
 ## Jivko's Desk
+```
 Start:      2017-09-07 10:25:30
 End:        2017-09-07 11:55:01
 Duration:   5371s
 Count:      1268
 Rate:       0.23608/s
 Dose rate:  0.080740μS/h
+```
 
 ## Granite Windowsill
+```
 Start:      2017-09-09 11:49:30
             2017-09-09 12:05:24
 Duration:   954s
 Count:      447
 Rate:       0.46855/s
 Dose rate:  0.16025μS/h
+```
